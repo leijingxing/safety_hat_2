@@ -9,6 +9,7 @@ import com.test.libncnn.CallMod
 import com.test.libncnn.SafeMod
 import com.test.libncnn.SmokeMod
 import com.test.libncnn.UniformMod
+import com.test.libncnn.VestMod
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -31,10 +32,12 @@ class NcnnCascadeAiRepository(
     private val smokeMod = SmokeMod()
     private val callMod = CallMod()
     private val uniformMod = UniformMod()
+    private val vestMod = VestMod()
 
     private val smokeLastMs = AtomicLong(0)
     private val callLastMs = AtomicLong(0)
     private val uniformLastMs = AtomicLong(0)
+    private val vestLastMs = AtomicLong(0)
 
     private val safeListener = object : BaseAi.BaseListener<Array<String>, Array<SafeMod.SafeObj>> {
         override fun onValue(value: Array<String>) = Unit
@@ -55,6 +58,7 @@ class NcnnCascadeAiRepository(
             cascadeSmoke(img, pts, array)
             cascadeCall(img, pts, array)
             cascadeUniform(img, pts, array)
+            cascadeVest(img, pts, array)
         }
     }
 
@@ -79,16 +83,25 @@ class NcnnCascadeAiRepository(
         }
     }
 
+    private val vestListener = object : BaseAi.BaseListener<Array<String>, Any> {
+        override fun onValue(img: Mat, pts: Long, array: Any) = Unit
+        override fun onValue(value: Array<String>) {
+            emitSimple("vest", value)
+        }
+    }
+
     override suspend fun start() {
         safeMod.setCallback(safeListener)
         smokeMod.setCallback(smokeListener)
         callMod.setCallback(callListener)
         uniformMod.setCallback(uniformListener)
+        vestMod.setCallback(vestListener)
 
         safeMod.loadModel(assets, 0, if (useGpu) 1 else 0)
         smokeMod.loadModel(assets, 0, if (useGpu) 1 else 0)
         callMod.loadModel(assets, 0, if (useGpu) 1 else 0)
         uniformMod.loadModel(assets, 0, if (useGpu) 1 else 0)
+        vestMod.loadModel(assets, 0, if (useGpu) 1 else 0)
     }
 
     override suspend fun stop() {
@@ -96,6 +109,7 @@ class NcnnCascadeAiRepository(
         smokeMod.setCallback(null)
         callMod.setCallback(null)
         uniformMod.setCallback(null)
+        vestMod.setCallback(null)
     }
 
     override fun submitFrame(rgbaMat: Mat, pts: Long) {
@@ -104,11 +118,12 @@ class NcnnCascadeAiRepository(
 
     private fun emitSimple(type: String, value: Array<String>) {
         if (value.isEmpty()) return
-        Log.i(tag, "$type=${value.joinToString(", ")}")
+        val mapped = value.joinToString(", ") { mapLabel(it) }
+        Log.i(tag, "$type=$mapped")
         _events.tryEmit(
             AiEvent(
                 type = type,
-                message = value.joinToString(", ") { mapLabel(it) },
+                message = mapped,
                 boxes = emptyList()
             )
         )
@@ -143,8 +158,13 @@ class NcnnCascadeAiRepository(
             "uniform" -> "工装"
             "vest", "refjacket", "reflective" -> "反光衣"
             "workclothes" -> "工作服"
+            "work_clothes" -> "工装"
             "normal" -> "正常"
             "other_clothes", "otherclothes" -> "非工装"
+            "no_reflective_jacket" -> "未穿反光衣"
+            "reflective_jacket" -> "已穿反光衣"
+            "unknow" -> "未知"
+            "nolandyard" -> "未系安全绳"
             else -> label
         }
     }
@@ -170,6 +190,14 @@ class NcnnCascadeAiRepository(
         if (!shouldRun(uniformLastMs, pts, 300)) return
         cascadeByLabels(img, array, listOf("personup", "persondown")) { cropped ->
             uniformMod.onRecvImage(cropped.nativeObj, 0)
+        }
+    }
+
+    // 反光衣检测：使用人员上/下身区域裁剪，送入反光衣分类模型
+    private fun cascadeVest(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
+        if (!shouldRun(vestLastMs, pts, 300)) return
+        cascadeByLabels(img, array, listOf("personup", "persondown")) { cropped ->
+            vestMod.onRecvImage(cropped.nativeObj, 0)
         }
     }
 

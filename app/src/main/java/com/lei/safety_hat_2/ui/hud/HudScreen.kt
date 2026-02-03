@@ -64,6 +64,10 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
                 alert = state.alertMessage,
                 alertId = state.alertId
             )
+            CapabilityChips(
+                modifier = Modifier.padding(start = 6.dp),
+                items = state.capabilities
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -217,16 +221,7 @@ private fun StatusPanel(modifier: Modifier, state: HudState) {
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        HudTile(
-            title = "设备状态",
-            value = if (state.systemStatus.isCameraOnline) "摄像头在线" else "摄像头离线",
-            accent = Color(0xFF53D3C7)
-        )
-        HudTile(
-            title = "电量",
-            value = "${state.systemStatus.batteryPercent}%",
-            accent = Color(0xFF52B788)
-        )
+        ViolationStatsCard(counts = state.violationCounts)
         ViolationList(
             title = "违规列表",
             items = state.violations
@@ -282,6 +277,74 @@ private fun ViolationList(title: String, items: List<String>) {
 }
 
 @Composable
+private fun ViolationStatsCard(counts: Map<String, Int>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF12151B))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "近 1 分钟违规统计",
+                color = Color(0xFFF59E0B),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            if (counts.isEmpty()) {
+                Text(
+                    text = "暂无数据",
+                    color = Color(0xFF7A9AA7)
+                )
+                return@Column
+            }
+            counts.forEach { (label, count) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = label,
+                        color = Color(0xFFE5E7EB)
+                    )
+                    Text(
+                        text = count.toString(),
+                        color = if (count == 0) Color(0xFF7A9AA7) else Color(0xFFF97316),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CapabilityChips(modifier: Modifier, items: List<String>) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items.forEach { item ->
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF1F2937))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = item,
+                    color = Color(0xFFE5E7EB),
+                    fontSize = 12.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun HudTile(title: String, value: String, accent: Color) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -318,11 +381,6 @@ private fun FootPanel(fps: Int) {
         Text(
             text = "链路：相机 → AI → 推流",
             color = Color(0xFF7A9AA7)
-        )
-        Text(
-            text = "FPS: $fps",
-            color = Color(0xFF9AD0D3),
-            fontWeight = FontWeight.Medium
         )
     }
 }

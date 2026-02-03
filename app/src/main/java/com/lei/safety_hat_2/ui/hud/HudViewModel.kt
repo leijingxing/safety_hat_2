@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlin.random.Random
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import java.util.ArrayDeque
 
 class HudViewModel(
     private val aiRepository: AiRepository = FakeAiRepository(),
@@ -34,13 +35,18 @@ class HudViewModel(
 
     private val _state = MutableStateFlow(HudState())
     val state: StateFlow<HudState> = _state.asStateFlow()
+    private val violationHistory: ArrayDeque<Pair<Long, String>> = ArrayDeque()
 
     init {
-        viewModelScope.launch {
+        // 原生模型加载可能耗时，必须放到后台线程，避免主线程卡死/ANR
+        viewModelScope.launch(Dispatchers.Default) {
             startAiDetectionUseCase.start()
             connectStreamUseCase.connect()
             cameraRepository.start()
         }
+        _state.value = _state.value.copy(
+            capabilities = listOf("安全帽", "抽烟", "打电话", "工装", "反光衣")
+        )
         observeAiEvents()
         simulateSystemStatus()
         if (useDemoFrames) {
@@ -59,11 +65,13 @@ class HudViewModel(
                 } else {
                     (newViolations + current.violations).take(8)
                 }
+                updateViolationStats(newViolations)
                 _state.value = current.copy(
                     alertMessage = "检测: ${event.message}",
                     alertId = current.alertId + 1,
                     boxes = if (event.boxes.isNotEmpty()) event.boxes else current.boxes,
-                    violations = mergedViolations
+                    violations = mergedViolations,
+                    violationCounts = computeViolationCounts()
                 )
             }
         }
@@ -115,9 +123,37 @@ class HudViewModel(
                 "抽烟" -> violations.add("抽烟")
                 "未戴安全帽" -> violations.add("未戴安全帽")
                 "非工装" -> violations.add("未穿工装")
+                "未穿反光衣" -> violations.add("未穿反光衣")
+                "未系安全绳" -> violations.add("未系安全绳")
                 "打电话" -> violations.add("打电话")
             }
         }
         return violations
+    }
+
+    private fun updateViolationStats(newViolations: List<String>) {
+        val now = System.currentTimeMillis()
+        newViolations.forEach { violationHistory.addLast(now to it) }
+        val cutoff = now - 60_000
+        while (violationHistory.isNotEmpty() && violationHistory.first().first < cutoff) {
+            violationHistory.removeFirst()
+        }
+    }
+
+    private fun computeViolationCounts(): Map<String, Int> {
+        val map = linkedMapOf(
+            "抽烟" to 0,
+            "未戴安全帽" to 0,
+            "未穿工装" to 0,
+            "未穿反光衣" to 0,
+            "未系安全绳" to 0,
+            "打电话" to 0
+        )
+        violationHistory.forEach { (_, type) ->
+            if (map.containsKey(type)) {
+                map[type] = (map[type] ?: 0) + 1
+            }
+        }
+        return map
     }
 }

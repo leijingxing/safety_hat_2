@@ -15,5 +15,7 @@ data class HudState(
     val alertId: Long = 0L,
     val boxes: List<BoundingBox> = emptyList(),
     val fps: Int = 30,
-    val violations: List<String> = emptyList()
+    val violations: List<String> = emptyList(),
+    val capabilities: List<String> = emptyList(),
+    val violationCounts: Map<String, Int> = emptyMap()
 )
