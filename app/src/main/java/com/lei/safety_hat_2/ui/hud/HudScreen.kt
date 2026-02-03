@@ -62,7 +62,8 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
             ) {
                 PreviewPanel(
                     modifier = Modifier.weight(1.4f),
-                    boxes = state.boxes
+                    boxes = state.boxes,
+                    onFrame = viewModel::submitFrame
                 )
                 StatusPanel(
                     modifier = Modifier.weight(1f),
@@ -129,7 +130,8 @@ private fun StatusPill(label: String) {
 @Composable
 private fun PreviewPanel(
     modifier: Modifier,
-    boxes: List<com.lei.safety_hat_2.core.model.BoundingBox>
+    boxes: List<com.lei.safety_hat_2.core.model.BoundingBox>,
+    onFrame: (org.opencv.core.Mat, Long) -> Unit
 ) {
     Card(
         modifier = modifier.height(420.dp),
@@ -137,22 +139,12 @@ private fun PreviewPanel(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0E141A))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            listOf(Color(0xFF20313B), Color(0xFF0A0F12))
-                        )
-                    )
-            )
-            Text(
-                text = "Camera Preview",
-                color = Color(0xFF7FB3C6),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(16.dp)
-            )
+            CameraPermissionGate {
+                CameraXPreview(
+                    modifier = Modifier.fillMaxSize(),
+                    onFrame = onFrame
+                )
+            }
             Canvas(modifier = Modifier.fillMaxSize()) {
                 boxes.forEach { box ->
                     val left = box.left.coerceIn(0f, 1f) * size.width

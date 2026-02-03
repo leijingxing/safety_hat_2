@@ -6,6 +6,7 @@ import com.lei.safety_hat_2.core.model.SystemStatus
 import com.lei.safety_hat_2.data.repository.FakeAiRepository
 import com.lei.safety_hat_2.data.repository.FakeCameraRepository
 import com.lei.safety_hat_2.data.repository.FakeStreamRepository
+import com.lei.safety_hat_2.domain.repository.AiRepository
 import com.lei.safety_hat_2.domain.usecase.ConnectStreamUseCase
 import com.lei.safety_hat_2.domain.usecase.StartAiDetectionUseCase
 import kotlinx.coroutines.Dispatchers
@@ -16,9 +17,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import org.opencv.core.CvType
+import org.opencv.core.Mat
 
-class HudViewModel : ViewModel() {
-    private val aiRepository = FakeAiRepository()
+class HudViewModel(
+    private val aiRepository: AiRepository = FakeAiRepository(),
+    private val useDemoFrames: Boolean = false,
+    private val demoWidth: Int = 1280,
+    private val demoHeight: Int = 720
+) : ViewModel() {
     private val cameraRepository = FakeCameraRepository()
     private val streamRepository = FakeStreamRepository()
 
@@ -36,14 +43,18 @@ class HudViewModel : ViewModel() {
         }
         observeAiEvents()
         simulateSystemStatus()
+        if (useDemoFrames) {
+            startDemoFrameLoop()
+        }
     }
 
     private fun observeAiEvents() {
         viewModelScope.launch(Dispatchers.Default) {
             aiRepository.events.collectLatest { event ->
-                _state.value = _state.value.copy(
+                val current = _state.value
+                _state.value = current.copy(
                     alertMessage = "检测: ${event.message}",
-                    boxes = event.boxes
+                    boxes = if (event.boxes.isNotEmpty()) event.boxes else current.boxes
                 )
             }
         }
@@ -70,5 +81,19 @@ class HudViewModel : ViewModel() {
                 delay(2000)
             }
         }
+    }
+
+    private fun startDemoFrameLoop() {
+        viewModelScope.launch(Dispatchers.Default) {
+            val mat = Mat(demoHeight, demoWidth, CvType.CV_8UC4)
+            while (true) {
+                aiRepository.submitFrame(mat, System.currentTimeMillis())
+                delay(500)
+            }
+        }
+    }
+
+    fun submitFrame(rgbaMat: Mat, pts: Long) {
+        aiRepository.submitFrame(rgbaMat, pts)
     }
 }

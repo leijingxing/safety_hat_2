@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "safety_hat_2"
 include(":app")
+include(":libncnn")
  

@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import org.opencv.core.Mat
 
 class FakeAiRepository : AiRepository {
     private val scope = CoroutineScope(Dispatchers.Default)
@@ -50,5 +51,9 @@ class FakeAiRepository : AiRepository {
     override suspend fun stop() {
         job?.cancel()
         job = null
+    }
+
+    override fun submitFrame(rgbaMat: Mat, pts: Long) {
+        // no-op for fake repository
     }
 }
