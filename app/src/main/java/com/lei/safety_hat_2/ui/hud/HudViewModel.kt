@@ -52,9 +52,18 @@ class HudViewModel(
         viewModelScope.launch(Dispatchers.Default) {
             aiRepository.events.collectLatest { event ->
                 val current = _state.value
+                // 每次识别事件都会刷新告警文本并触发 UI 高亮提示
+                val newViolations = extractViolations(event.message)
+                val mergedViolations = if (newViolations.isEmpty()) {
+                    current.violations
+                } else {
+                    (newViolations + current.violations).take(8)
+                }
                 _state.value = current.copy(
                     alertMessage = "检测: ${event.message}",
-                    boxes = if (event.boxes.isNotEmpty()) event.boxes else current.boxes
+                    alertId = current.alertId + 1,
+                    boxes = if (event.boxes.isNotEmpty()) event.boxes else current.boxes,
+                    violations = mergedViolations
                 )
             }
         }
@@ -95,5 +104,20 @@ class HudViewModel(
 
     fun submitFrame(rgbaMat: Mat, pts: Long) {
         aiRepository.submitFrame(rgbaMat, pts)
+    }
+
+    private fun extractViolations(message: String): List<String> {
+        if (message.isBlank()) return emptyList()
+        val tokens = message.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        val violations = mutableListOf<String>()
+        tokens.forEach { token ->
+            when (token) {
+                "抽烟" -> violations.add("抽烟")
+                "未戴安全帽" -> violations.add("未戴安全帽")
+                "非工装" -> violations.add("未穿工装")
+                "打电话" -> violations.add("打电话")
+            }
+        }
+        return violations
     }
 }

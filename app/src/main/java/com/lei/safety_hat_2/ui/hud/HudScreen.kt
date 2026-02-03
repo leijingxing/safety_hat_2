@@ -1,5 +1,6 @@
 package com.lei.safety_hat_2.ui.hud
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -22,9 +23,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -34,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 
 @Composable
 fun HudScreen(viewModel: HudViewModel = viewModel()) {
@@ -53,8 +60,9 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             HeaderRow(
-                title = "Safety Hat HUD",
-                alert = state.alertMessage
+                title = "智能安全帽",
+                alert = state.alertMessage,
+                alertId = state.alertId
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -78,7 +86,17 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
 }
 
 @Composable
-private fun HeaderRow(title: String, alert: String) {
+private fun HeaderRow(title: String, alert: String, alertId: Long) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(alertId) {
+        if (alertId > 0) {
+            visible = true
+            delay(2000)
+            visible = false
+        }
+    }
+    val alpha by animateFloatAsState(targetValue = if (visible) 1f else 0f, label = "alertAlpha")
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -93,13 +111,43 @@ private fun HeaderRow(title: String, alert: String) {
                 ),
                 color = Color(0xFFE8F1F4)
             )
-            Text(
+            AlertBanner(
                 text = alert,
-                style = MaterialTheme.typography.bodyMedium,
-                color = Color(0xFF9FD6E8)
+                alpha = alpha
             )
         }
-        StatusPill(label = "LIVE")
+        StatusPill(label = "实时")
+    }
+}
+
+@Composable
+private fun AlertBanner(text: String, alpha: Float) {
+    if (alpha <= 0.01f) return
+    Row(
+        modifier = Modifier
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(Color(0xFF7F1D1D), Color(0xFFEA580C), Color(0xFFF59E0B))
+                )
+            )
+            .alpha(alpha)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFFFEDD5))
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = text,
+            color = Color(0xFFFFF7ED),
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -175,24 +223,9 @@ private fun StatusPanel(modifier: Modifier, state: HudState) {
             accent = Color(0xFF53D3C7)
         )
         HudTile(
-            title = "推流",
-            value = if (state.systemStatus.isStreaming) "RTMP 连接中" else "未连接",
-            accent = Color(0xFFFAA307)
-        )
-        HudTile(
             title = "电量",
             value = "${state.systemStatus.batteryPercent}%",
             accent = Color(0xFF52B788)
-        )
-        HudTile(
-            title = "温度",
-            value = "${state.systemStatus.temperatureC.toInt()}°C",
-            accent = Color(0xFFE56B6F)
-        )
-        HudTile(
-            title = "CPU 负载",
-            value = "${state.systemStatus.cpuLoad}%",
-            accent = Color(0xFF4EA8DE)
         )
     }
 }
@@ -232,7 +265,7 @@ private fun FootPanel(fps: Int) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "Pipeline: Camera → AI → Stream",
+            text = "链路：相机 → AI → 推流",
             color = Color(0xFF7A9AA7)
         )
         Text(

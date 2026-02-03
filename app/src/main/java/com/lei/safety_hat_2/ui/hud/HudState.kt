@@ -12,6 +12,8 @@ data class HudState(
         isCameraOnline = true
     ),
     val alertMessage: String = "系统待命",
+    val alertId: Long = 0L,
     val boxes: List<BoundingBox> = emptyList(),
-    val fps: Int = 30
+    val fps: Int = 30,
+    val violations: List<String> = emptyList()
 )
