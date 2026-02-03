@@ -57,6 +57,7 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
     implementation(project(":libncnn"))
+    implementation(project(":librtmps"))
     implementation(files("../libncnn/libs/opencv345-debug.aar"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

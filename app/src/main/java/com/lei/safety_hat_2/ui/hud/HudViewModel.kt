@@ -7,6 +7,7 @@ import com.lei.safety_hat_2.data.repository.FakeAiRepository
 import com.lei.safety_hat_2.data.repository.FakeCameraRepository
 import com.lei.safety_hat_2.data.repository.FakeStreamRepository
 import com.lei.safety_hat_2.data.repository.ImuRepository
+import com.lei.safety_hat_2.data.repository.RtmpRepository
 import com.lei.safety_hat_2.domain.repository.AiRepository
 import com.lei.safety_hat_2.domain.usecase.ConnectStreamUseCase
 import com.lei.safety_hat_2.domain.usecase.StartAiDetectionUseCase
@@ -25,6 +26,7 @@ import java.util.ArrayDeque
 class HudViewModel(
     private val aiRepository: AiRepository = FakeAiRepository(),
     private val imuRepository: ImuRepository? = null,
+    private val rtmpRepository: RtmpRepository? = null,
     private val useDemoFrames: Boolean = false,
     private val demoWidth: Int = 1280,
     private val demoHeight: Int = 720
@@ -117,6 +119,24 @@ class HudViewModel(
         aiRepository.submitFrame(rgbaMat, pts)
     }
 
+    fun submitRtmpFrame(nv21: ByteArray, width: Int, height: Int, timestampNs: Long) {
+        if (_state.value.frameWidth == 0 || _state.value.frameHeight == 0) {
+            _state.value = _state.value.copy(frameWidth = width, frameHeight = height)
+        }
+        rtmpRepository?.offerFrame(nv21, width, height, timestampNs)
+    }
+
+    fun toggleStreaming(width: Int, height: Int) {
+        val repo = rtmpRepository ?: return
+        if (repo.isRunning()) {
+            repo.stop()
+            _state.value = _state.value.copy(isStreaming = false)
+        } else {
+            repo.start(width, height)
+            _state.value = _state.value.copy(isStreaming = true)
+        }
+    }
+
     private fun observeImu() {
         if (imuRepository == null) return
         imuRepository.start()
@@ -173,5 +193,6 @@ class HudViewModel(
     override fun onCleared() {
         super.onCleared()
         imuRepository?.stop()
+        rtmpRepository?.stop()
     }
 }

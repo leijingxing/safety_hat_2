@@ -18,5 +18,8 @@ data class HudState(
     val violations: List<String> = emptyList(),
     val capabilities: List<String> = emptyList(),
     val violationCounts: Map<String, Int> = emptyMap(),
-    val imu: com.lei.safety_hat_2.core.model.ImuSample? = null
+    val imu: com.lei.safety_hat_2.core.model.ImuSample? = null,
+    val isStreaming: Boolean = false,
+    val frameWidth: Int = 0,
+    val frameHeight: Int = 0
 )

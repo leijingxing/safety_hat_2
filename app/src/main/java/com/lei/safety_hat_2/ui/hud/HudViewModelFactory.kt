@@ -6,12 +6,15 @@ import androidx.lifecycle.ViewModelProvider
 import android.content.Context
 import com.lei.safety_hat_2.data.repository.ImuRepository
 import com.lei.safety_hat_2.data.repository.NcnnCascadeAiRepository
+import com.lei.safety_hat_2.data.repository.RtmpRepository
 
 class HudViewModelFactory(
     private val assets: AssetManager,
     private val context: Context,
     private val useGpu: Boolean = false,
-    private val useDemoFrames: Boolean = false
+    private val useDemoFrames: Boolean = false,
+    private val rtmpBaseUrl: String,
+    private val rtmpStreamId: String
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(HudViewModel::class.java)) {
@@ -22,6 +25,10 @@ class HudViewModelFactory(
                     useGpu = useGpu
                 ),
                 imuRepository = ImuRepository(context),
+                rtmpRepository = RtmpRepository(
+                    baseUrl = rtmpBaseUrl,
+                    streamId = rtmpStreamId
+                ),
                 useDemoFrames = useDemoFrames
             ) as T
         }

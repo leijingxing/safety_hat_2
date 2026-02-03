@@ -16,12 +16,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             Safety_hat_2Theme {
+                val streamId = "123"
                 val vm = viewModel<com.lei.safety_hat_2.ui.hud.HudViewModel>(
                     factory = HudViewModelFactory(
                         assets = assets,
                         context = applicationContext,
                         useGpu = false,
-                        useDemoFrames = false
+                        useDemoFrames = false,
+                        rtmpBaseUrl = "rtmp://111.9.22.231:50168/live",
+                        rtmpStreamId = "test123"
                     )
                 )
                 HudScreen(viewModel = vm)

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -62,7 +63,13 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
             HeaderRow(
                 title = "智能安全帽",
                 alert = state.alertMessage,
-                alertId = state.alertId
+                alertId = state.alertId,
+                isStreaming = state.isStreaming,
+                onToggleStream = {
+                    if (state.frameWidth > 0 && state.frameHeight > 0) {
+                        viewModel.toggleStreaming(state.frameWidth, state.frameHeight)
+                    }
+                }
             )
             CapabilityChips(
                 modifier = Modifier.padding(start = 6.dp),
@@ -75,7 +82,8 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
                 PreviewPanel(
                     modifier = Modifier.weight(1.4f),
                     boxes = state.boxes,
-                    onFrame = viewModel::submitFrame
+                    onFrame = viewModel::submitFrame,
+                    onFrameNv21 = viewModel::submitRtmpFrame
                 )
                 StatusPanel(
                     modifier = Modifier.weight(1f),
@@ -90,7 +98,13 @@ fun HudScreen(viewModel: HudViewModel = viewModel()) {
 }
 
 @Composable
-private fun HeaderRow(title: String, alert: String, alertId: Long) {
+private fun HeaderRow(
+    title: String,
+    alert: String,
+    alertId: Long,
+    isStreaming: Boolean,
+    onToggleStream: () -> Unit
+) {
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(alertId) {
         if (alertId > 0) {
@@ -120,7 +134,17 @@ private fun HeaderRow(title: String, alert: String, alertId: Long) {
                 alpha = alpha
             )
         }
-        StatusPill(label = "实时")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StatusPill(label = "实时")
+            Spacer(modifier = Modifier.width(10.dp))
+            TextButton(onClick = onToggleStream) {
+                Text(
+                    text = if (isStreaming) "停止推流" else "开始推流",
+                    color = if (isStreaming) Color(0xFFF97316) else Color(0xFF34D399),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
     }
 }
 
@@ -183,7 +207,8 @@ private fun StatusPill(label: String) {
 private fun PreviewPanel(
     modifier: Modifier,
     boxes: List<com.lei.safety_hat_2.core.model.BoundingBox>,
-    onFrame: (org.opencv.core.Mat, Long) -> Unit
+    onFrame: (org.opencv.core.Mat, Long) -> Unit,
+    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
 ) {
     Card(
         modifier = modifier.height(420.dp),
@@ -194,7 +219,8 @@ private fun PreviewPanel(
             CameraPermissionGate {
                 CameraXPreview(
                     modifier = Modifier.fillMaxSize(),
-                    onFrame = onFrame
+                    onFrame = onFrame,
+                    onFrameNv21 = onFrameNv21
                 )
             }
             Canvas(modifier = Modifier.fillMaxSize()) {

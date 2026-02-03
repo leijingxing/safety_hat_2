@@ -25,7 +25,8 @@ import java.util.concurrent.Executors
 @Composable
 fun CameraXPreview(
     modifier: Modifier = Modifier,
-    onFrame: (Mat, Long) -> Unit
+    onFrame: (Mat, Long) -> Unit,
+    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -45,7 +46,7 @@ fun CameraXPreview(
                 .build()
 
             imageAnalysis.setAnalyzer(analysisExecutor) { imageProxy ->
-                handleImageProxy(imageProxy, onFrame)
+                handleImageProxy(imageProxy, onFrame, onFrameNv21)
             }
 
             val selector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -69,9 +70,14 @@ fun CameraXPreview(
 
 private fun handleImageProxy(
     imageProxy: ImageProxy,
-    onFrame: (Mat, Long) -> Unit
+    onFrame: (Mat, Long) -> Unit,
+    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
 ) {
-    val mat = imageProxyToRgba(imageProxy)
+    val nv21 = imageProxyToNv21(imageProxy)
+    if (nv21 != null) {
+        onFrameNv21(nv21, imageProxy.width, imageProxy.height, imageProxy.imageInfo.timestamp)
+    }
+    val mat = nv21?.let { nv21ToRgbaMat(it, imageProxy.width, imageProxy.height, imageProxy.imageInfo.rotationDegrees) }
     if (mat != null) {
         try {
             onFrame(mat, imageProxy.imageInfo.timestamp)
@@ -82,35 +88,59 @@ private fun handleImageProxy(
     imageProxy.close()
 }
 
-private fun imageProxyToRgba(imageProxy: ImageProxy): Mat? {
+private fun imageProxyToNv21(imageProxy: ImageProxy): ByteArray? {
     val image = imageProxy.image ?: return null
     val width = imageProxy.width
     val height = imageProxy.height
 
-    val yBuffer = image.planes[0].buffer
-    val uBuffer = image.planes[1].buffer
-    val vBuffer = image.planes[2].buffer
+    val yPlane = image.planes[0]
+    val uPlane = image.planes[1]
+    val vPlane = image.planes[2]
 
-    val ySize = yBuffer.remaining()
-    val uSize = uBuffer.remaining()
-    val vSize = vBuffer.remaining()
+    val nv21 = ByteArray(width * height * 3 / 2)
+    var offset = 0
 
-    val nv21 = ByteArray(ySize + uSize + vSize)
-    yBuffer.get(nv21, 0, ySize)
-    vBuffer.get(nv21, ySize, vSize)
-    uBuffer.get(nv21, ySize + vSize, uSize)
+    // Copy Y plane respecting rowStride
+    val yBuffer = yPlane.buffer
+    val yRowStride = yPlane.rowStride
+    for (row in 0 until height) {
+        val rowStart = row * yRowStride
+        yBuffer.position(rowStart)
+        yBuffer.get(nv21, offset, width)
+        offset += width
+    }
 
-    yBuffer.rewind()
-    uBuffer.rewind()
-    vBuffer.rewind()
+    // Interleave VU for NV21, respecting pixelStride and rowStride
+    val uBuffer = uPlane.buffer
+    val vBuffer = vPlane.buffer
+    val uRowStride = uPlane.rowStride
+    val vRowStride = vPlane.rowStride
+    val uPixelStride = uPlane.pixelStride
+    val vPixelStride = vPlane.pixelStride
 
+    val chromaHeight = height / 2
+    val chromaWidth = width / 2
+    for (row in 0 until chromaHeight) {
+        val uRowStart = row * uRowStride
+        val vRowStart = row * vRowStride
+        for (col in 0 until chromaWidth) {
+            val uIndex = uRowStart + col * uPixelStride
+            val vIndex = vRowStart + col * vPixelStride
+            nv21[offset++] = vBuffer.get(vIndex)
+            nv21[offset++] = uBuffer.get(uIndex)
+        }
+    }
+
+    return nv21
+}
+
+private fun nv21ToRgbaMat(nv21: ByteArray, width: Int, height: Int, rotation: Int): Mat {
     val yuvMat = Mat(height + height / 2, width, CvType.CV_8UC1)
     yuvMat.put(0, 0, nv21)
     val rgbaMat = Mat()
     Imgproc.cvtColor(yuvMat, rgbaMat, Imgproc.COLOR_YUV2RGBA_NV21)
     yuvMat.release()
 
-    val rotation = imageProxy.imageInfo.rotationDegrees
     if (rotation == 0) return rgbaMat
 
     val rotated = Mat()
@@ -118,10 +148,7 @@ private fun imageProxyToRgba(imageProxy: ImageProxy): Mat? {
         90 -> Core.rotate(rgbaMat, rotated, Core.ROTATE_90_CLOCKWISE)
         180 -> Core.rotate(rgbaMat, rotated, Core.ROTATE_180)
         270 -> Core.rotate(rgbaMat, rotated, Core.ROTATE_90_COUNTERCLOCKWISE)
-        else -> {
-            rgbaMat.release()
-            return null
-        }
+        else -> return rgbaMat
     }
     rgbaMat.release()
     return rotated
