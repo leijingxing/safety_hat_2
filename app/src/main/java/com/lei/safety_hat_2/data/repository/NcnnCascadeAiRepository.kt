@@ -38,12 +38,19 @@ class NcnnCascadeAiRepository(
     private val callLastMs = AtomicLong(0)
     private val uniformLastMs = AtomicLong(0)
     private val vestLastMs = AtomicLong(0)
+    private val minPersonConfidence = 0.5f
+    private val minPersonAreaRatio = 0.02f
+    private val personLabels = setOf("person", "personup", "persondown")
 
     private val safeListener = object : BaseAi.BaseListener<Array<String>, Array<SafeMod.SafeObj>> {
         override fun onValue(value: Array<String>) = Unit
 
         override fun onValue(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
-            val boxes = mapBoxes(img, array)
+            val validPersons = filterValidPersons(img, array)
+            if (validPersons.isEmpty()) {
+                return
+            }
+            val boxes = mapBoxes(img, array, validPersons.isNotEmpty())
             val message = boxes.map { it.label }.distinct().joinToString(", ")
             _events.tryEmit(
                 AiEvent(
@@ -55,10 +62,10 @@ class NcnnCascadeAiRepository(
             if (message.isNotBlank()) {
                 Log.i(tag, "safe=$message")
             }
-            cascadeSmoke(img, pts, array)
-            cascadeCall(img, pts, array)
-            cascadeUniform(img, pts, array)
-            cascadeVest(img, pts, array)
+            cascadeSmoke(img, pts, validPersons)
+            cascadeCall(img, pts, validPersons)
+            cascadeUniform(img, pts, validPersons)
+            cascadeVest(img, pts, validPersons)
         }
     }
 
@@ -129,7 +136,12 @@ class NcnnCascadeAiRepository(
         )
     }
 
-    private fun mapBoxes(img: Mat, array: Array<SafeMod.SafeObj>): List<BoundingBox> {
+    private fun mapBoxes(
+        img: Mat,
+        array: Array<SafeMod.SafeObj>,
+        hasPerson: Boolean
+    ): List<BoundingBox> {
+        if (!hasPerson) return emptyList()
         val width = img.width().toFloat().coerceAtLeast(1f)
         val height = img.height().toFloat().coerceAtLeast(1f)
         return array.map { obj ->
@@ -142,6 +154,18 @@ class NcnnCascadeAiRepository(
                 label = mapLabel(obj.lableString),
                 confidence = obj.prob
             )
+        }.filter { box ->
+            if (box.confidence < minPersonConfidence) return@filter false
+            val labelKey = box.label
+            val areaRatio = (box.right - box.left) * (box.bottom - box.top)
+            if (labelKey == mapLabel("person") ||
+                labelKey == mapLabel("personup") ||
+                labelKey == mapLabel("persondown")
+            ) {
+                areaRatio >= minPersonAreaRatio
+            } else {
+                true
+            }
         }
     }
 
@@ -170,40 +194,40 @@ class NcnnCascadeAiRepository(
     }
 
     // 先通过安全帽/人体检测结果裁剪人脸/上半身区域，再触发抽烟识别，避免全图推理浪费算力
-    private fun cascadeSmoke(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
+    private fun cascadeSmoke(img: Mat, pts: Long, validPersons: List<SafeMod.SafeObj>) {
         if (!shouldRun(smokeLastMs, pts, 200)) return
-        cascadeByLabels(img, array, listOf("nohelmat", "helmat")) { cropped ->
+        cascadeByLabels(img, validPersons, listOf("personup", "person")) { cropped ->
             smokeMod.onRecvImage(cropped.nativeObj, 0)
         }
     }
 
     // 拨打电话识别同样复用安全帽/人体检测结果裁剪区域
-    private fun cascadeCall(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
+    private fun cascadeCall(img: Mat, pts: Long, validPersons: List<SafeMod.SafeObj>) {
         if (!shouldRun(callLastMs, pts, 200)) return
-        cascadeByLabels(img, array, listOf("nohelmat", "helmat")) { cropped ->
+        cascadeByLabels(img, validPersons, listOf("personup", "person")) { cropped ->
             callMod.onRecvImage(cropped.nativeObj, 0)
         }
     }
 
     // 工装识别使用 personup/persondown 区域裁剪，降低误检与计算量
-    private fun cascadeUniform(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
+    private fun cascadeUniform(img: Mat, pts: Long, validPersons: List<SafeMod.SafeObj>) {
         if (!shouldRun(uniformLastMs, pts, 300)) return
-        cascadeByLabels(img, array, listOf("personup", "persondown")) { cropped ->
+        cascadeByLabels(img, validPersons, listOf("personup", "persondown")) { cropped ->
             uniformMod.onRecvImage(cropped.nativeObj, 0)
         }
     }
 
     // 反光衣检测：使用人员上/下身区域裁剪，送入反光衣分类模型
-    private fun cascadeVest(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
+    private fun cascadeVest(img: Mat, pts: Long, validPersons: List<SafeMod.SafeObj>) {
         if (!shouldRun(vestLastMs, pts, 300)) return
-        cascadeByLabels(img, array, listOf("personup", "persondown")) { cropped ->
+        cascadeByLabels(img, validPersons, listOf("personup", "persondown")) { cropped ->
             vestMod.onRecvImage(cropped.nativeObj, 0)
         }
     }
 
     private fun cascadeByLabels(
         img: Mat,
-        array: Array<SafeMod.SafeObj>,
+        array: List<SafeMod.SafeObj>,
         labels: List<String>,
         onCrop: (Mat) -> Unit
     ) {
@@ -219,6 +243,21 @@ class NcnnCascadeAiRepository(
                     cropped.release()
                 }
             }
+    }
+
+    private fun filterValidPersons(
+        img: Mat,
+        array: Array<SafeMod.SafeObj>
+    ): List<SafeMod.SafeObj> {
+        val width = img.width().toFloat().coerceAtLeast(1f)
+        val height = img.height().toFloat().coerceAtLeast(1f)
+        return array.filter { obj ->
+            if (!personLabels.contains(obj.lableString)) return@filter false
+            if (obj.prob < minPersonConfidence) return@filter false
+            val rect = obj.rect
+            val areaRatio = (rect.width / width) * (rect.height / height)
+            areaRatio >= minPersonAreaRatio
+        }
     }
 
     private fun expandRect(rect: Rect, imgW: Int, imgH: Int, ratio: Float): Rect {
