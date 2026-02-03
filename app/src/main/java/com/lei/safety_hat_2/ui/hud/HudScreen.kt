@@ -227,6 +227,57 @@ private fun StatusPanel(modifier: Modifier, state: HudState) {
             value = "${state.systemStatus.batteryPercent}%",
             accent = Color(0xFF52B788)
         )
+        ViolationList(
+            title = "违规列表",
+            items = state.violations
+        )
+    }
+}
+
+@Composable
+private fun ViolationList(title: String, items: List<String>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF12151B))
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                color = Color(0xFFF59E0B),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            if (items.isEmpty()) {
+                Text(
+                    text = "暂无违规",
+                    color = Color(0xFF7A9AA7)
+                )
+                return@Column
+            }
+            items.take(8).forEachIndexed { index, item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFEF4444))
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${index + 1}. $item",
+                        color = Color(0xFFFEE2E2),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
     }
 }
 
