@@ -17,5 +17,6 @@ data class HudState(
     val fps: Int = 30,
     val violations: List<String> = emptyList(),
     val capabilities: List<String> = emptyList(),
-    val violationCounts: Map<String, Int> = emptyMap()
+    val violationCounts: Map<String, Int> = emptyMap(),
+    val imu: com.lei.safety_hat_2.core.model.ImuSample? = null
 )

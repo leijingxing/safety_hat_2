@@ -1,0 +1,68 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.test.libncnn'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 24
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles "consumer-rules.pro"
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++20"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    // 可选的 ABI 配置，用于选择构建哪些平台
+    splits {
+        abi {
+            enable true
+            universalApk false
+            reset()
+            include "arm64-v8a"  // 根据需求选择 ABI
+        }
+    }
+    ndkVersion '26.0.10792818'
+
+    // 确保 libc++_shared.so 被打包
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true  // 启用旧版 JNI 库打包，允许在apk中包含多个库文件，即使这些文件存在冲突。
+        }
+    }
+}
+
+dependencies {
+
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
+    // 读取yaml文件的SnakeYAML库
+    implementation 'org.yaml:snakeyaml:2.3'
+//    api files('libs/opencv345-debug.aar')
+    compileOnly fileTree(include: ['*.jar', "*.aar"], dir: 'libs')
+
+}
