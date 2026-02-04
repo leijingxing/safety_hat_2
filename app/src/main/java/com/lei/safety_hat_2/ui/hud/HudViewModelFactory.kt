@@ -4,7 +4,6 @@ import android.content.res.AssetManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import android.content.Context
-import com.lei.safety_hat_2.data.repository.ImuRepository
 import com.lei.safety_hat_2.data.repository.NcnnCascadeAiRepository
 import com.lei.safety_hat_2.data.repository.RtmpRepository
 
@@ -24,7 +23,6 @@ class HudViewModelFactory(
                     assets = assets,
                     useGpu = useGpu
                 ),
-                imuRepository = ImuRepository(context),
                 rtmpRepository = RtmpRepository(
                     baseUrl = rtmpBaseUrl,
                     streamId = rtmpStreamId

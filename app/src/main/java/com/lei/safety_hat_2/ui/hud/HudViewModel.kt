@@ -6,7 +6,6 @@ import com.lei.safety_hat_2.core.model.SystemStatus
 import com.lei.safety_hat_2.data.repository.FakeAiRepository
 import com.lei.safety_hat_2.data.repository.FakeCameraRepository
 import com.lei.safety_hat_2.data.repository.FakeStreamRepository
-import com.lei.safety_hat_2.data.repository.ImuRepository
 import com.lei.safety_hat_2.data.repository.RtmpRepository
 import com.lei.safety_hat_2.domain.repository.AiRepository
 import com.lei.safety_hat_2.domain.usecase.ConnectStreamUseCase
@@ -25,7 +24,6 @@ import java.util.ArrayDeque
 
 class HudViewModel(
     private val aiRepository: AiRepository = FakeAiRepository(),
-    private val imuRepository: ImuRepository? = null,
     private val rtmpRepository: RtmpRepository? = null,
     private val useDemoFrames: Boolean = false,
     private val demoWidth: Int = 1280,
@@ -52,7 +50,6 @@ class HudViewModel(
             capabilities = listOf("安全帽", "抽烟", "打电话", "工装", "反光衣")
         )
         observeAiEvents()
-        observeImu()
         simulateSystemStatus()
         if (useDemoFrames) {
             startDemoFrameLoop()
@@ -137,16 +134,6 @@ class HudViewModel(
         }
     }
 
-    private fun observeImu() {
-        if (imuRepository == null) return
-        imuRepository.start()
-        viewModelScope.launch {
-            imuRepository.sample.collectLatest { sample ->
-                _state.value = _state.value.copy(imu = sample)
-            }
-        }
-    }
-
     private fun extractViolations(message: String): List<String> {
         if (message.isBlank()) return emptyList()
         val tokens = message.split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -192,7 +179,6 @@ class HudViewModel(
 
     override fun onCleared() {
         super.onCleared()
-        imuRepository?.stop()
         rtmpRepository?.stop()
     }
 }

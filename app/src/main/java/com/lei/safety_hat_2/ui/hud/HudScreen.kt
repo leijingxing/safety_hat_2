@@ -247,7 +247,6 @@ private fun StatusPanel(modifier: Modifier, state: HudState) {
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        ImuCard(sample = state.imu)
         ViolationStatsCard(counts = state.violationCounts)
         ViolationList(
             title = "违规列表",
@@ -346,64 +345,6 @@ private fun ViolationStatsCard(counts: Map<String, Int>) {
             }
         }
     }
-}
-
-@Composable
-private fun ImuCard(sample: com.lei.safety_hat_2.core.model.ImuSample?) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF111217))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = "IMU 实时数据",
-                color = Color(0xFF60A5FA),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            if (sample == null) {
-                Text(
-                    text = "传感器未就绪",
-                    color = Color(0xFF7A9AA7)
-                )
-                return@Column
-            }
-            ImuRow(
-                label = "加速度 (m/s²)",
-                value = "x=${sample.ax.format()}  y=${sample.ay.format()}  z=${sample.az.format()}",
-                tint = Color(0xFF93C5FD)
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            ImuRow(
-                label = "角速度 (rad/s)",
-                value = "x=${sample.gx.format()}  y=${sample.gy.format()}  z=${sample.gz.format()}",
-                tint = Color(0xFFFBBF24)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ImuRow(label: String, value: String, tint: Color) {
-    Column {
-        Text(
-            text = label,
-            color = Color(0xFF9CA3AF),
-            fontSize = 12.sp
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = value,
-            color = tint,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-private fun Float.format(): String {
-    return String.format("%.2f", this)
 }
 
 @Composable
