@@ -19,6 +19,8 @@
 #define FLV_TAG_HEAD_LEN 11
 #define FLV_PRE_TAG_LEN 4
 #define RTMP_CONNECTION_TIMEOUT 5000
+#define VIDEO_CODEC_AVC 7
+#define VIDEO_CODEC_HEVC 12
 
 static const AVal av_onMetaData = AVC("onMetaData");
 static const AVal av_duration = AVC("duration");
@@ -43,6 +45,14 @@ static uint64_t g_time_begin;
 
 bool video_config_ok = false;
 bool audio_config_ok = false;
+static int g_video_codec = VIDEO_CODEC_AVC;
+static bool hevc_config_ok = false;
+static uint8_t *g_vps = NULL;
+static uint8_t *g_sps = NULL;
+static uint8_t *g_pps = NULL;
+static uint32_t g_vps_len = 0;
+static uint32_t g_sps_len = 0;
+static uint32_t g_pps_len = 0;
 
 void flv_file_open(const char *filename) {
     if (NULL == filename) {
@@ -76,6 +86,230 @@ void write_flv_header(bool is_have_audio, bool is_have_video) {
     fwrite(flv_file_header, 13, 1, g_file_handle);
 
     return;
+}
+
+typedef struct {
+    const uint8_t *data;
+    uint32_t size;
+    uint32_t bitpos;
+} BitReader;
+
+static uint32_t br_read_bits(BitReader *br, uint32_t n) {
+    uint32_t val = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        if (br->bitpos >= br->size * 8) {
+            return val;
+        }
+        uint32_t byte_offset = br->bitpos / 8;
+        uint32_t bit_offset = 7 - (br->bitpos % 8);
+        uint8_t bit = (br->data[byte_offset] >> bit_offset) & 0x01;
+        val = (val << 1) | bit;
+        br->bitpos++;
+    }
+    return val;
+}
+
+static uint8_t *nal_to_rbsp(const uint8_t *nal, uint32_t nal_len, uint32_t *rbsp_len) {
+    if (nal_len == 0) {
+        *rbsp_len = 0;
+        return NULL;
+    }
+    uint8_t *rbsp = (uint8_t *)malloc(nal_len);
+    if (!rbsp) {
+        *rbsp_len = 0;
+        return NULL;
+    }
+    uint32_t j = 0;
+    int zero_count = 0;
+    for (uint32_t i = 0; i < nal_len; i++) {
+        uint8_t b = nal[i];
+        if (zero_count == 2 && b == 0x03) {
+            zero_count = 0;
+            continue;
+        }
+        rbsp[j++] = b;
+        if (b == 0x00) {
+            zero_count++;
+        } else {
+            zero_count = 0;
+        }
+    }
+    *rbsp_len = j;
+    return rbsp;
+}
+
+typedef struct {
+    uint8_t general_profile_space;
+    uint8_t general_tier_flag;
+    uint8_t general_profile_idc;
+    uint32_t general_profile_compatibility_flags;
+    uint64_t general_constraint_indicator_flags;
+    uint8_t general_level_idc;
+    uint8_t num_temporal_layers;
+} HevcPtl;
+
+static bool parse_hevc_ptl_from_vps(const uint8_t *vps, uint32_t vps_len, HevcPtl *out_ptl) {
+    if (!vps || vps_len < 6 || !out_ptl) {
+        return false;
+    }
+    uint32_t rbsp_len = 0;
+    uint8_t *rbsp = nal_to_rbsp(vps, vps_len, &rbsp_len);
+    if (!rbsp || rbsp_len < 8) {
+        free(rbsp);
+        return false;
+    }
+    BitReader br;
+    br.data = rbsp;
+    br.size = rbsp_len;
+    br.bitpos = 0;
+
+    // skip NAL header (16 bits)
+    br_read_bits(&br, 16);
+    br_read_bits(&br, 4);  // vps_video_parameter_set_id
+    br_read_bits(&br, 1);  // vps_base_layer_internal_flag
+    br_read_bits(&br, 1);  // vps_base_layer_available_flag
+    br_read_bits(&br, 6);  // vps_max_layers_minus1
+    uint32_t max_sub_layers_minus1 = br_read_bits(&br, 3);
+    br_read_bits(&br, 1);  // vps_temporal_id_nesting_flag
+    br_read_bits(&br, 16); // vps_reserved_0xffff_16bits
+
+    out_ptl->general_profile_space = br_read_bits(&br, 2);
+    out_ptl->general_tier_flag = br_read_bits(&br, 1);
+    out_ptl->general_profile_idc = br_read_bits(&br, 5);
+    out_ptl->general_profile_compatibility_flags =
+            (br_read_bits(&br, 8) << 24) |
+            (br_read_bits(&br, 8) << 16) |
+            (br_read_bits(&br, 8) << 8) |
+            br_read_bits(&br, 8);
+    uint64_t constraint = 0;
+    for (int i = 0; i < 6; i++) {
+        constraint = (constraint << 8) | br_read_bits(&br, 8);
+    }
+    out_ptl->general_constraint_indicator_flags = constraint;
+    out_ptl->general_level_idc = br_read_bits(&br, 8);
+
+    out_ptl->num_temporal_layers = (uint8_t)(max_sub_layers_minus1 + 1);
+    free(rbsp);
+    return true;
+}
+
+static void hevc_reset_config() {
+    hevc_config_ok = false;
+    if (g_vps) free(g_vps);
+    if (g_sps) free(g_sps);
+    if (g_pps) free(g_pps);
+    g_vps = NULL;
+    g_sps = NULL;
+    g_pps = NULL;
+    g_vps_len = 0;
+    g_sps_len = 0;
+    g_pps_len = 0;
+}
+
+static void hevc_store_nal(uint8_t **dst, uint32_t *dst_len, const uint8_t *nal, uint32_t nal_len) {
+    if (!dst || !dst_len || !nal || nal_len == 0) {
+        return;
+    }
+    if (*dst) {
+        free(*dst);
+    }
+    *dst = (uint8_t *)malloc(nal_len);
+    if (*dst) {
+        memcpy(*dst, nal, nal_len);
+        *dst_len = nal_len;
+    }
+}
+
+static bool hevc_is_keyframe(uint8_t nal_type) {
+    return (nal_type == 19 || nal_type == 20 || nal_type == 21);
+}
+
+static uint8_t *build_hevc_decoder_config(uint32_t *out_len, uint8_t num_temporal_layers) {
+    if (!g_vps || !g_sps || !g_pps || !out_len) {
+        return NULL;
+    }
+    HevcPtl ptl;
+    bool ok = parse_hevc_ptl_from_vps(g_vps, g_vps_len, &ptl);
+    if (!ok) {
+        ptl.general_profile_space = 0;
+        ptl.general_tier_flag = 0;
+        ptl.general_profile_idc = 1; // Main profile
+        ptl.general_profile_compatibility_flags = 0;
+        ptl.general_constraint_indicator_flags = 0;
+        ptl.general_level_idc = 120;
+        ptl.num_temporal_layers = num_temporal_layers;
+    }
+
+    uint32_t config_size = 23;
+    config_size += 1 + 2 + 2 + g_vps_len;
+    config_size += 1 + 2 + 2 + g_sps_len;
+    config_size += 1 + 2 + 2 + g_pps_len;
+
+    uint8_t *config = (uint8_t *)malloc(config_size);
+    if (!config) {
+        return NULL;
+    }
+    uint32_t offset = 0;
+    config[offset++] = 0x01; // configurationVersion
+    config[offset++] = (ptl.general_profile_space << 6) |
+                       (ptl.general_tier_flag << 5) |
+                       (ptl.general_profile_idc & 0x1F);
+    config[offset++] = (uint8_t)(ptl.general_profile_compatibility_flags >> 24);
+    config[offset++] = (uint8_t)(ptl.general_profile_compatibility_flags >> 16);
+    config[offset++] = (uint8_t)(ptl.general_profile_compatibility_flags >> 8);
+    config[offset++] = (uint8_t)(ptl.general_profile_compatibility_flags);
+    config[offset++] = (uint8_t)(ptl.general_constraint_indicator_flags >> 40);
+    config[offset++] = (uint8_t)(ptl.general_constraint_indicator_flags >> 32);
+    config[offset++] = (uint8_t)(ptl.general_constraint_indicator_flags >> 24);
+    config[offset++] = (uint8_t)(ptl.general_constraint_indicator_flags >> 16);
+    config[offset++] = (uint8_t)(ptl.general_constraint_indicator_flags >> 8);
+    config[offset++] = (uint8_t)(ptl.general_constraint_indicator_flags);
+    config[offset++] = ptl.general_level_idc;
+
+    config[offset++] = 0xF0; // reserved(4) + min_spatial_segmentation_idc(12)
+    config[offset++] = 0x00;
+    config[offset++] = 0xFC; // reserved(6) + parallelismType(2)
+    config[offset++] = 0xFD; // reserved(6) + chromaFormat(2) -> 4:2:0
+    config[offset++] = 0xF8; // reserved(5) + bitDepthLumaMinus8(3)
+    config[offset++] = 0xF8; // reserved(5) + bitDepthChromaMinus8(3)
+    config[offset++] = 0x00; // avgFrameRate (16 bits)
+    config[offset++] = 0x00;
+
+    uint8_t temporal_layers = ptl.num_temporal_layers;
+    if (temporal_layers == 0) temporal_layers = 1;
+    if (temporal_layers > 7) temporal_layers = 7;
+    config[offset++] = (uint8_t)((0 << 6) | (temporal_layers << 3) | (1 << 2) | 3); // lengthSizeMinusOne=3
+    config[offset++] = 3; // numOfArrays
+
+    // VPS array
+    config[offset++] = (1 << 7) | (32 & 0x3F);
+    config[offset++] = 0x00;
+    config[offset++] = 0x01; // numNalus
+    config[offset++] = (uint8_t)(g_vps_len >> 8);
+    config[offset++] = (uint8_t)(g_vps_len);
+    memcpy(config + offset, g_vps, g_vps_len);
+    offset += g_vps_len;
+
+    // SPS array
+    config[offset++] = (1 << 7) | (33 & 0x3F);
+    config[offset++] = 0x00;
+    config[offset++] = 0x01; // numNalus
+    config[offset++] = (uint8_t)(g_sps_len >> 8);
+    config[offset++] = (uint8_t)(g_sps_len);
+    memcpy(config + offset, g_sps, g_sps_len);
+    offset += g_sps_len;
+
+    // PPS array
+    config[offset++] = (1 << 7) | (34 & 0x3F);
+    config[offset++] = 0x00;
+    config[offset++] = 0x01; // numNalus
+    config[offset++] = (uint8_t)(g_pps_len >> 8);
+    config[offset++] = (uint8_t)(g_pps_len);
+    memcpy(config + offset, g_pps, g_pps_len);
+    offset += g_pps_len;
+
+    *out_len = offset;
+    return config;
 }
 
 static uint8_t gen_audio_tag_header()
@@ -147,7 +381,8 @@ static uint8_t gen_audio_tag_header()
     return val;
 }
 
-int rtmp_open_for_write(const char *url, uint32_t video_width, uint32_t video_height,uint32_t frame_rate, RTMP** out_rtmp) {
+int rtmp_open_for_write(const char *url, uint32_t video_width, uint32_t video_height,
+                        uint32_t frame_rate, int video_codec, RTMP** out_rtmp) {
 
     LIBRTMP_LOGD("rtmp_open_for_write 0 \n");
     *out_rtmp = RTMP_Alloc();
@@ -191,6 +426,8 @@ int rtmp_open_for_write(const char *url, uint32_t video_width, uint32_t video_he
     }
 
     video_config_ok = false;
+    g_video_codec = video_codec;
+    hevc_reset_config();
     audio_config_ok = false;
 
     LIBRTMP_LOGD("rtmp_open_for_write 5 \n");
@@ -209,7 +446,7 @@ int rtmp_open_for_write(const char *url, uint32_t video_width, uint32_t video_he
         output = AMF_EncodeNamedNumber(output, outend, &av_width, video_width);
         output = AMF_EncodeNamedNumber(output, outend, &av_height, video_height);
         output = AMF_EncodeNamedNumber(output, outend, &av_duration, 0.0);
-        output = AMF_EncodeNamedNumber(output, outend, &av_videocodecid, 7);
+        output = AMF_EncodeNamedNumber(output, outend, &av_videocodecid, g_video_codec);
         output = AMF_EncodeNamedNumber(output, outend, &av_videoframerate, frame_rate);
         output = AMF_EncodeNamedNumber(output, outend, &av_audiocodecid, 10);
         output = AMF_EncodeInt24(output, outend, AMF_OBJECT_END);
@@ -243,6 +480,7 @@ void rtmp_close(RTMP *rtmp) {
         RTMP_Close(rtmp);
         RTMP_Free(rtmp);
     }
+    hevc_reset_config();
 }
 
 int rtmp_is_connected(RTMP *rtmp)
@@ -378,6 +616,145 @@ int send_key_frame(RTMP *rtmp, int nal_len,  uint32_t ts,  uint32_t abs_ts, uint
     return val;
 }
 
+static int send_hevc_config(RTMP *rtmp, uint32_t ts, uint32_t abs_ts) {
+    uint32_t config_len = 0;
+    uint8_t *config = build_hevc_decoder_config(&config_len, 1);
+    if (!config || config_len == 0) {
+        if (config) free(config);
+        return -1;
+    }
+    uint32_t body_len = config_len + 5;
+    uint32_t output_len = body_len + FLV_TAG_HEAD_LEN + FLV_PRE_TAG_LEN;
+    char *output = malloc(output_len);
+    if (!output) {
+        free(config);
+        return -1;
+    }
+    uint32_t offset = 0;
+    output[offset++] = 0x09; // video tag
+    output[offset++] = (uint8_t)(body_len >> 16);
+    output[offset++] = (uint8_t)(body_len >> 8);
+    output[offset++] = (uint8_t)(body_len);
+    output[offset++] = (uint8_t)(ts >> 16);
+    output[offset++] = (uint8_t)(ts >> 8);
+    output[offset++] = (uint8_t)(ts);
+    output[offset++] = (uint8_t)(ts >> 24);
+    output[offset++] = abs_ts;
+    output[offset++] = 0x00;
+    output[offset++] = 0x00;
+
+    output[offset++] = 0x1C; // key frame, HEVC (CodecID=12)
+    output[offset++] = 0x00; // sequence header
+    output[offset++] = 0x00; // composition time
+    output[offset++] = 0x00;
+    output[offset++] = 0x00;
+
+    memcpy(output + offset, config, config_len);
+    offset += config_len;
+
+    uint32_t fff = body_len + FLV_TAG_HEAD_LEN;
+    output[offset++] = (uint8_t)(fff >> 24);
+    output[offset++] = (uint8_t)(fff >> 16);
+    output[offset++] = (uint8_t)(fff >> 8);
+    output[offset++] = (uint8_t)(fff);
+
+    int val = RTMP_Write(rtmp, output, output_len);
+    free(output);
+    free(config);
+    return val;
+}
+
+static int send_hevc_nalu(RTMP *rtmp, const uint8_t *nal, uint32_t nal_len,
+                          uint32_t ts, uint32_t abs_ts, bool is_key) {
+    uint32_t body_len = nal_len + 5 + 4;
+    uint32_t output_len = body_len + FLV_TAG_HEAD_LEN + FLV_PRE_TAG_LEN;
+    char *output = malloc(output_len);
+    if (!output) {
+        return -1;
+    }
+    uint32_t offset = 0;
+    output[offset++] = 0x09; // video tag
+    output[offset++] = (uint8_t)(body_len >> 16);
+    output[offset++] = (uint8_t)(body_len >> 8);
+    output[offset++] = (uint8_t)(body_len);
+    output[offset++] = (uint8_t)(ts >> 16);
+    output[offset++] = (uint8_t)(ts >> 8);
+    output[offset++] = (uint8_t)(ts);
+    output[offset++] = (uint8_t)(ts >> 24);
+    output[offset++] = abs_ts;
+    output[offset++] = 0x00;
+    output[offset++] = 0x00;
+
+    output[offset++] = (uint8_t)((is_key ? 1 : 2) << 4 | 12);
+    output[offset++] = 0x01; // NALU
+    output[offset++] = 0x00;
+    output[offset++] = 0x00;
+    output[offset++] = 0x00;
+
+    output[offset++] = (uint8_t)(nal_len >> 24);
+    output[offset++] = (uint8_t)(nal_len >> 16);
+    output[offset++] = (uint8_t)(nal_len >> 8);
+    output[offset++] = (uint8_t)(nal_len);
+    memcpy(output + offset, nal, nal_len);
+    offset += nal_len;
+
+    uint32_t fff = body_len + FLV_TAG_HEAD_LEN;
+    output[offset++] = (uint8_t)(fff >> 24);
+    output[offset++] = (uint8_t)(fff >> 16);
+    output[offset++] = (uint8_t)(fff >> 8);
+    output[offset++] = (uint8_t)(fff);
+
+    int val = RTMP_Write(rtmp, output, output_len);
+    free(output);
+    return val;
+}
+
+static int rtmp_sender_write_video_frame_hevc(RTMP *rtmp, uint8_t *data,
+                                             int total, uint64_t dts_us, uint32_t abs_ts) {
+    uint8_t *buf = data;
+    uint8_t *buf_offset = data;
+    uint32_t ts = (uint32_t)dts_us;
+    uint32_t nal_len;
+    uint8_t *nal;
+
+    nal = get_nal(&nal_len, &buf_offset, buf, total);
+    if (nal == NULL) {
+        return -1;
+    }
+
+    int val = 0;
+    while (nal != NULL) {
+        uint8_t nal_type = (nal[0] >> 1) & 0x3F;
+        if (nal_type == 32) { // VPS
+            hevc_store_nal(&g_vps, &g_vps_len, nal, nal_len);
+        } else if (nal_type == 33) { // SPS
+            hevc_store_nal(&g_sps, &g_sps_len, nal, nal_len);
+        } else if (nal_type == 34) { // PPS
+            hevc_store_nal(&g_pps, &g_pps_len, nal, nal_len);
+        }
+
+        if (!hevc_config_ok && g_vps && g_sps && g_pps) {
+            int cfg = send_hevc_config(rtmp, ts, abs_ts);
+            if (cfg < RTMP_SUCCESS) {
+                return cfg;
+            }
+            hevc_config_ok = true;
+        }
+
+        if (nal_type <= 31) {
+            bool is_key = hevc_is_keyframe(nal_type);
+            int res = send_hevc_nalu(rtmp, nal, nal_len, ts, abs_ts, is_key);
+            if (res < RTMP_SUCCESS) {
+                return res;
+            }
+            val += res;
+        }
+
+        nal = get_nal(&nal_len, &buf_offset, buf, total);
+    }
+    return val;
+}
+
 
 // @brief send video frame, now only H264 supported
 // @param [in] rtmp_sender handler
@@ -391,6 +768,9 @@ int rtmp_sender_write_video_frame(RTMP *rtmp, uint8_t *data,
                                   int key,
                                   uint32_t abs_ts)
 {
+    if (g_video_codec == VIDEO_CODEC_HEVC) {
+        return rtmp_sender_write_video_frame_hevc(rtmp, data, total, dts_us, abs_ts);
+    }
     uint8_t * buf;
     uint8_t * buf_offset;
     int val = 0;

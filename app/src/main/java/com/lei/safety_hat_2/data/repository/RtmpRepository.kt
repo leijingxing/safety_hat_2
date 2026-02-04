@@ -1,6 +1,7 @@
 package com.lei.safety_hat_2.data.repository
 
 import android.util.Log
+import android.media.MediaFormat
 import com.lei.safety_hat_2.data.rtmp.RtmpStreamer
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -17,7 +18,14 @@ class RtmpRepository(
         if (running.get()) return
         val url = "${baseUrl}/${streamId}"
         val bitrate = width * height * 2
-        val newStreamer = RtmpStreamer(url, width, height, fps, bitrate)
+        val newStreamer = RtmpStreamer(
+            url = url,
+            width = width,
+            height = height,
+            fps = fps,
+            bitrate = bitrate,
+            preferredMimeType = MediaFormat.MIMETYPE_VIDEO_HEVC
+        )
         if (newStreamer.start()) {
             streamer = newStreamer
             running.set(true)

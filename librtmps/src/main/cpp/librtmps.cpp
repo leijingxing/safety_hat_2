@@ -20,11 +20,12 @@ public:
     ~RtmpPublish(){
 
     }
-    int open(const char *url, uint32_t video_width, uint32_t video_height,uint32_t frame_rate){
+    int open(const char *url, uint32_t video_width, uint32_t video_height,
+             uint32_t frame_rate, int video_codec){
         if (rtmpPtr && *rtmpPtr) {
             return 0;
         }else{
-            int result = rtmp_open_for_write(url,video_width, video_height, frame_rate, rtmpPtr);
+            int result = rtmp_open_for_write(url, video_width, video_height, frame_rate, video_codec, rtmpPtr);
             return result;
         }
     }
@@ -78,7 +79,7 @@ Java_com_example_librtmps_NativeLib_nativeAlloc(JNIEnv* env, jobject thiz) {
 }
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_librtmps_NativeLib_nativeOpen(JNIEnv* env, jobject thiz,
-                jlong rtmpPointer, jstring url, jint w, jint h, jint fps) {
+                jlong rtmpPointer, jstring url, jint w, jint h, jint fps, jint videoCodec) {
     RtmpPublish *rtmp = (RtmpPublish *) rtmpPointer;
     if (rtmp != NULL && !rtmp->isConnect()) {
         const char *nativeString = NULL;
@@ -87,7 +88,7 @@ Java_com_example_librtmps_NativeLib_nativeOpen(JNIEnv* env, jobject thiz,
             return;
         }
         LIBRTMP_LOGD("nativeOpen url:%s\n", nativeString);
-        rtmp->open(nativeString, w, h, fps);
+        rtmp->open(nativeString, w, h, fps, videoCodec);
         env->ReleaseStringUTFChars(url, nativeString);
     }
 }

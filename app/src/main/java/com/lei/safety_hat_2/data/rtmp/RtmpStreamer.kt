@@ -19,12 +19,14 @@ class RtmpStreamer(
     private val width: Int,
     private val height: Int,
     private val fps: Int,
-    private val bitrate: Int
+    private val bitrate: Int,
+    private val preferredMimeType: String = MediaFormat.MIMETYPE_VIDEO_AVC
 ) {
     private val tag = "RtmpStreamer"
     private val rtmpLib = NativeLib()
     private val running = AtomicBoolean(false)
     private var codec: MediaCodec? = null
+    private var activeMimeType: String = preferredMimeType
     private var colorFormat: Int = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
     private var sendJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default)
@@ -38,13 +40,25 @@ class RtmpStreamer(
             Log.e(tag, "rtmp init mem failed")
             return false
         }
-        if (!rtmpLib.open(url, width, height, fps)) {
-            Log.e(tag, "rtmp open failed")
-            return false
+        codec = createCodec(preferredMimeType)
+        if (codec == null && preferredMimeType == MediaFormat.MIMETYPE_VIDEO_HEVC) {
+            Log.w(tag, "HEVC encoder not available, fallback to AVC")
+            codec = createCodec(MediaFormat.MIMETYPE_VIDEO_AVC)
         }
-        codec = createCodec()
         if (codec == null) {
             rtmpLib.close()
+            return false
+        }
+        val activeCodecType = if (activeMimeType == MediaFormat.MIMETYPE_VIDEO_HEVC) {
+            NativeLib.VIDEO_CODEC_HEVC
+        } else {
+            NativeLib.VIDEO_CODEC_AVC
+        }
+        if (!rtmpLib.open(url, width, height, fps, activeCodecType)) {
+            Log.e(tag, "rtmp open failed")
+            codec?.stop()
+            codec?.release()
+            codec = null
             return false
         }
         running.set(true)
@@ -70,11 +84,12 @@ class RtmpStreamer(
         frameChannel.trySend(VideoFrame(nv21, timestampNs))
     }
 
-    private fun createCodec(): MediaCodec? {
+    private fun createCodec(mimeType: String): MediaCodec? {
         return try {
-            val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            colorFormat = chooseColorFormat(codec)
-            val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
+            val codec = MediaCodec.createEncoderByType(mimeType)
+            activeMimeType = mimeType
+            colorFormat = chooseColorFormat(codec, mimeType)
+            val format = MediaFormat.createVideoFormat(mimeType, width, height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, fps)
@@ -85,7 +100,7 @@ class RtmpStreamer(
                 start()
             }
         } catch (e: Exception) {
-            Log.e(tag, "createCodec error: ${e.message}")
+            Log.e(tag, "createCodec error ($mimeType): ${e.message}")
             null
         }
     }
@@ -165,9 +180,9 @@ class RtmpStreamer(
         return out
     }
 
-    private fun chooseColorFormat(codec: MediaCodec): Int {
+    private fun chooseColorFormat(codec: MediaCodec, mimeType: String): Int {
         return try {
-            val caps = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val caps = codec.codecInfo.getCapabilitiesForType(mimeType)
             val formats = caps.colorFormats.toSet()
             when {
                 formats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) ->

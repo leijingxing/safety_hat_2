@@ -167,9 +167,9 @@ class NativeLib {
         return true
     }
 
-    fun open(url: String, w:Int, h:Int, fps: Int):Boolean {
+    fun open(url: String, w:Int, h:Int, fps: Int, videoCodec: Int):Boolean {
         if (rtmpPointer != 0L && dataBuffer != null) {
-            nativeOpen(rtmpPointer, url, w, h, fps)
+            nativeOpen(rtmpPointer, url, w, h, fps, videoCodec)
             val ret = isConnect()
             if(ret){
                 mBack?.onRtmpStatus("rtmp_ok")
@@ -227,12 +227,16 @@ class NativeLib {
     external fun stringFromJNI(): String
 
     private external fun nativeAlloc(): Long
-    private external fun nativeOpen(pointer: Long, url:String, w:Int, h:Int, fps:Int)
+    private external fun nativeOpen(pointer: Long, url:String, w:Int, h:Int, fps:Int, videoCodec: Int)
+
     private external fun nativeClose(pointer: Long)
     private external fun nativeIsConnected(pointer: Long): Boolean
     private external fun nativeWriteVideo(pointer: Long, data: ByteBuffer, length: Int, timestamp: Long): Int
 
     companion object {
+        const val VIDEO_CODEC_AVC = 7
+        const val VIDEO_CODEC_HEVC = 12
+
         // Used to load the 'librtmps' library on application startup.
         init {
             System.loadLibrary("librtmps")
