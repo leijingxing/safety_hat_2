@@ -3,6 +3,7 @@ package com.lei.safety_hat_2.ui.hud
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,57 +43,116 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 
 @Composable
 fun HudScreen(viewModel: HudViewModel = viewModel()) {
     val state by viewModel.state.collectAsState()
-    val bg = Brush.verticalGradient(
-        listOf(Color(0xFF0B1F2A), Color(0xFF162B33), Color(0xFF1C1D1F))
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(bg)
-            .padding(16.dp)
-    ) {
-        Column(
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    Box(modifier = Modifier.fillMaxSize()) {
+        FullScreenPreview(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            HeaderRow(
-                title = "智能安全帽",
-                alert = state.alertMessage,
-                alertId = state.alertId,
-                isStreaming = state.isStreaming,
-                onToggleStream = {
-                    if (state.frameWidth > 0 && state.frameHeight > 0) {
-                        viewModel.toggleStreaming(state.frameWidth, state.frameHeight)
-                    }
-                }
-            )
-            CapabilityChips(
-                modifier = Modifier.padding(start = 6.dp),
-                items = state.capabilities
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                PreviewPanel(
-                    modifier = Modifier.weight(1.4f),
-                    boxes = state.boxes,
-                    onFrame = viewModel::submitFrame,
-                    onFrameNv21 = viewModel::submitRtmpFrame
+            boxes = state.boxes,
+            onFrame = viewModel::submitFrame,
+            onFrameNv21 = viewModel::submitRtmpFrame
+        )
+
+        // Subtle sci-fi scrim for readability
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0x99060A0E),
+                            Color(0x33060A0E),
+                            Color(0x99060A0E)
+                        )
+                    )
                 )
+        )
+
+        if (isLandscape) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(14.dp)
+            ) {
+                Column(
+                    modifier = Modifier.align(Alignment.TopStart),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    HeaderRow(
+                        title = "智能安全帽",
+                        alert = state.alertMessage,
+                        alertId = state.alertId,
+                        isStreaming = state.isStreaming,
+                        onToggleStream = {
+                            if (state.frameWidth > 0 && state.frameHeight > 0) {
+                                viewModel.toggleStreaming(state.frameWidth, state.frameHeight)
+                            }
+                        }
+                    )
+                    CapabilityChips(
+                        modifier = Modifier.padding(start = 6.dp),
+                        items = state.capabilities
+                    )
+                }
+
                 StatusPanel(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .width(320.dp),
                     state = state
                 )
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .width(360.dp)
+                ) {
+                    FootPanel(fps = state.fps)
+                }
             }
-            FootPanel(
-                fps = state.fps
-            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                HeaderRow(
+                    title = "智能安全帽",
+                    alert = state.alertMessage,
+                    alertId = state.alertId,
+                    isStreaming = state.isStreaming,
+                    onToggleStream = {
+                        if (state.frameWidth > 0 && state.frameHeight > 0) {
+                            viewModel.toggleStreaming(state.frameWidth, state.frameHeight)
+                        }
+                    }
+                )
+                CapabilityChips(
+                    modifier = Modifier.padding(start = 6.dp),
+                    items = state.capabilities
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Spacer(modifier = Modifier.weight(1.6f))
+                    StatusPanel(
+                        modifier = Modifier.weight(1f),
+                        state = state
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+                FootPanel(fps = state.fps)
+            }
         }
     }
 }
@@ -211,13 +271,13 @@ private fun PreviewPanel(
     onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
 ) {
     Card(
-        modifier = modifier.height(420.dp),
+        modifier = modifier,
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0E141A))
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             CameraPermissionGate {
-                CameraXPreview(
+                UsbCameraPreview(
                     modifier = Modifier.fillMaxSize(),
                     onFrame = onFrame,
                     onFrameNv21 = onFrameNv21
@@ -257,11 +317,7 @@ private fun StatusPanel(modifier: Modifier, state: HudState) {
 
 @Composable
 private fun ViolationList(title: String, items: List<String>) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF12151B))
-    ) {
+    HudOverlayCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = title,
@@ -304,11 +360,7 @@ private fun ViolationList(title: String, items: List<String>) {
 
 @Composable
 private fun ViolationStatsCard(counts: Map<String, Int>) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF12151B))
-    ) {
+    HudOverlayCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = "近 1 分钟违规统计",
@@ -357,12 +409,13 @@ private fun CapabilityChips(modifier: Modifier, items: List<String>) {
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF1F2937))
+                    .background(Color(0xAA0F1D27))
+                    .border(1.dp, Color(0x5538E8FF), RoundedCornerShape(12.dp))
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
                 Text(
                     text = item,
-                    color = Color(0xFFE5E7EB),
+                    color = Color(0xFFE0F2FE),
                     fontSize = 12.sp
                 )
             }
@@ -372,11 +425,7 @@ private fun CapabilityChips(modifier: Modifier, items: List<String>) {
 
 @Composable
 private fun HudTile(title: String, value: String, accent: Color) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF111820))
-    ) {
+    HudOverlayCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = title,
@@ -395,18 +444,95 @@ private fun HudTile(title: String, value: String, accent: Color) {
 
 @Composable
 private fun FootPanel(fps: Int) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF0E151C))
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+    HudOverlayCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "链路：相机 → AI → 推流",
+                color = Color(0xFF7A9AA7)
+            )
+            Text(
+                text = "FPS: $fps",
+                color = Color(0xFF38E8FF),
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullScreenPreview(
+    modifier: Modifier,
+    boxes: List<com.lei.safety_hat_2.core.model.BoundingBox>,
+    onFrame: (org.opencv.core.Mat, Long) -> Unit,
+    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
+) {
+    Box(modifier = modifier) {
+        CameraPermissionGate {
+            UsbCameraPreview(
+                modifier = Modifier.fillMaxSize(),
+                onFrame = onFrame,
+                onFrameNv21 = onFrameNv21
+            )
+        }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // scanlines
+            val step = 24f
+            var y = 0f
+            while (y < size.height) {
+                drawLine(
+                    color = Color(0x1100E5FF),
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f
+                )
+                y += step
+            }
+            // bounding boxes
+            boxes.forEach { box ->
+                val left = box.left.coerceIn(0f, 1f) * size.width
+                val top = box.top.coerceIn(0f, 1f) * size.height
+                val right = box.right.coerceIn(0f, 1f) * size.width
+                val bottom = box.bottom.coerceIn(0f, 1f) * size.height
+                drawRect(
+                    color = Color(0xFF38E8FF),
+                    topLeft = Offset(left, top),
+                    size = Size(right - left, bottom - top),
+                    style = Stroke(width = 3f)
+                )
+                drawLine(
+                    color = Color(0xFF38E8FF),
+                    start = Offset(left, top),
+                    end = Offset(left + 24f, top),
+                    strokeWidth = 4f
+                )
+                drawLine(
+                    color = Color(0xFF38E8FF),
+                    start = Offset(right, bottom),
+                    end = Offset(right - 24f, bottom),
+                    strokeWidth = 4f
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HudOverlayCard(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xA50B1218))
+            .border(1.dp, Color(0x6638E8FF), RoundedCornerShape(16.dp))
     ) {
-        Text(
-            text = "链路：相机 → AI → 推流",
-            color = Color(0xFF7A9AA7)
-        )
+        content()
     }
 }
