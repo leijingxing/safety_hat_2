@@ -277,7 +277,7 @@ private fun PreviewPanel(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             CameraPermissionGate {
-                UsbCameraPreview(
+                AdaptiveCameraPreview(
                     modifier = Modifier.fillMaxSize(),
                     onFrame = onFrame,
                     onFrameNv21 = onFrameNv21
@@ -474,7 +474,7 @@ private fun FullScreenPreview(
 ) {
     Box(modifier = modifier) {
         CameraPermissionGate {
-            UsbCameraPreview(
+            AdaptiveCameraPreview(
                 modifier = Modifier.fillMaxSize(),
                 onFrame = onFrame,
                 onFrameNv21 = onFrameNv21
@@ -519,6 +519,33 @@ private fun FullScreenPreview(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun AdaptiveCameraPreview(
+    modifier: Modifier = Modifier,
+    onFrame: (org.opencv.core.Mat, Long) -> Unit,
+    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
+) {
+    var fallbackToBuiltin by remember { mutableStateOf(false) }
+
+    if (!fallbackToBuiltin) {
+        UsbCameraPreview(
+            modifier = modifier,
+            onFrame = onFrame,
+            onFrameNv21 = onFrameNv21,
+            onPreviewError = {
+                // 策略：USB 优先；USB 不可用或中断时自动回退到内置 CameraX。
+                fallbackToBuiltin = true
+            }
+        )
+    } else {
+        CameraXPreview(
+            modifier = modifier,
+            onFrame = onFrame,
+            onFrameNv21 = onFrameNv21
+        )
     }
 }
 

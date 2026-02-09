@@ -17,7 +17,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // Hide status/navigation bars for full-screen HUD.
+        // HUD 场景默认全屏，系统栏通过手势临时唤出，避免遮挡画面信息。
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
             hide(WindowInsetsCompat.Type.systemBars())
@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             Safety_hat_2Theme {
+                // 统一在 Activity 注入运行参数，便于现场快速切换 GPU/推流配置。
                 val streamId = "123"
                 val vm = viewModel<com.lei.safety_hat_2.ui.hud.HudViewModel>(
                     factory = HudViewModelFactory(

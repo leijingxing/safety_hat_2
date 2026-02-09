@@ -36,6 +36,7 @@ class UsbCameraController(
     private var imageReader: ImageReader? = null
     private var usbManager: UsbManager? = null
     private var usbDevice: UsbDevice? = null
+    // opened 只表示“控制器已进入打开流程”，避免重复初始化。
     private val opened = AtomicBoolean(false)
     private var frameThread: HandlerThread? = null
     private var frameHandler: Handler? = null
@@ -46,7 +47,7 @@ class UsbCameraController(
                 usbAction -> {
                     val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                     if (granted) {
-                        // Re-check devices to avoid stale references after permission.
+                        // 权限回调后重新扫描设备，避免持有过期设备引用。
                         findAndRequest()
                     } else {
                         onPreviewError("USB permission denied")
@@ -72,7 +73,7 @@ class UsbCameraController(
     fun start(context: Context, surfaceView: SurfaceView) {
         this.context = context
         this.surfaceView = surfaceView
-        // Surface is for live preview; frames go through ImageReader.
+        // SurfaceView 负责实时预览显示，算法帧统一走 ImageReader 输出。
         surfaceView.holder.addCallback(this)
 
         usbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
@@ -87,6 +88,7 @@ class UsbCameraController(
             return
         }
         opened.set(false)
+        // 先移除输出 Surface，再停预览/关相机，避免底层回调继续写入已销毁对象。
         cameraHelper?.removeSurface(imageReader?.surface)
         val holderSurface = surfaceView?.holder?.surface
         if (holderSurface != null) {
@@ -107,7 +109,7 @@ class UsbCameraController(
     override fun surfaceCreated(holder: SurfaceHolder) {
         val helper = cameraHelper ?: return
         helper.addSurface(holder.surface, false)
-        // If camera opened before surface creation, restart preview for the surface.
+        // 若相机已打开而 Surface 刚创建，需要补一次 startPreview 才会出图。
         if (opened.get() && helper.isCameraOpened) {
             helper.startPreview()
         }
@@ -171,7 +173,7 @@ class UsbCameraController(
         val device = usbDevice ?: return
         if (opened.get()) return
 
-        // Prepare frame reader and camera helper before selecting device.
+        // 在选设备前先准备帧读取和状态回调，保证开流后第一帧就能接住。
         ensureReader()
         if (cameraHelper == null) {
             cameraHelper = CameraHelper()
@@ -191,6 +193,7 @@ class UsbCameraController(
             PixelFormat.RGBA_8888,
             2
         ).also { reader ->
+            // 使用 acquireLatestImage 丢弃堆积旧帧，优先保证实时性。
             reader.setOnImageAvailableListener({ r ->
                 val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
                 try {
@@ -209,6 +212,7 @@ class UsbCameraController(
 
     private fun ensureFrameThread() {
         if (frameThread != null) return
+        // 图像回调放到独立线程，避免阻塞主线程和 UVC 内部线程。
         frameThread = HandlerThread("UsbCamFrameThread").also { thread ->
             thread.start()
             frameHandler = Handler(thread.looper)
@@ -234,6 +238,7 @@ class UsbCameraController(
             val target = usbDevice ?: return
             if (device == null || device.deviceId != target.deviceId) return
             val param = UVCParam().apply {
+                // 该 quirk 用于兼容部分设备带宽协商问题，减少黑屏概率。
                 quirks = UVCCamera.UVC_QUIRK_FIX_BANDWIDTH
             }
             helper.openCamera(param)
@@ -244,7 +249,7 @@ class UsbCameraController(
             val target = usbDevice ?: return
             if (device == null || device.deviceId != target.deviceId) return
 
-            // Choose a matching preview size (MJPEG preferred)
+            // 优先选择目标分辨率 + MJPEG，失败时回退到设备首个可用分辨率。
             val supported = helper.supportedSizeList
             val picked = supported?.firstOrNull {
                 it.width == UsbCameraConfig.WIDTH &&
@@ -263,9 +268,24 @@ class UsbCameraController(
             helper.startPreview()
         }
 
-        override fun onCameraClose(device: UsbDevice?) = stop()
-        override fun onDeviceClose(device: UsbDevice?) = stop()
-        override fun onDetach(device: UsbDevice?) = stop()
-        override fun onCancel(device: UsbDevice?) = stop()
+        override fun onCameraClose(device: UsbDevice?) {
+            onPreviewError("USB camera closed")
+            stop()
+        }
+
+        override fun onDeviceClose(device: UsbDevice?) {
+            onPreviewError("USB device closed")
+            stop()
+        }
+
+        override fun onDetach(device: UsbDevice?) {
+            onPreviewError("USB camera detached")
+            stop()
+        }
+
+        override fun onCancel(device: UsbDevice?) {
+            onPreviewError("USB camera canceled")
+            stop()
+        }
     }
 }

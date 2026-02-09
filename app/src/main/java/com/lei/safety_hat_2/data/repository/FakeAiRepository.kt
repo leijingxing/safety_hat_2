@@ -24,6 +24,7 @@ class FakeAiRepository : AiRepository {
 
     override suspend fun start() {
         if (job != null) return
+        // 演示仓库按固定周期生成随机框，用于无模型/无相机场景联调 UI。
         job = scope.launch {
             while (isActive) {
                 val boxes = listOf(
@@ -54,6 +55,6 @@ class FakeAiRepository : AiRepository {
     }
 
     override fun submitFrame(rgbaMat: Mat, pts: Long) {
-        // no-op for fake repository
+        // Fake 实现不消费真实帧，保留接口仅用于兼容调用链。
     }
 }

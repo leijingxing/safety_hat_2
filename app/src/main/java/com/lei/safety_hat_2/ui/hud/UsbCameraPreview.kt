@@ -17,14 +17,16 @@ import org.opencv.imgproc.Imgproc
 fun UsbCameraPreview(
     modifier: Modifier = Modifier,
     onFrame: (Mat, Long) -> Unit,
-    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit
+    onFrameNv21: (ByteArray, Int, Int, Long) -> Unit,
+    onPreviewError: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val controller = remember {
         UsbCameraController(
             onFrameRgba = { image ->
                 handleUsbImage(image, onFrame, onFrameNv21)
-            }
+            },
+            onPreviewError = onPreviewError
         )
     }
     val surfaceView = remember { SurfaceView(context) }

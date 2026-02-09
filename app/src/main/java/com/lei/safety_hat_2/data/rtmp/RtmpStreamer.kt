@@ -36,6 +36,7 @@ class RtmpStreamer(
 
     fun start(): Boolean {
         if (running.get()) return true
+        // Native 端内存和 RTMP 上下文必须先初始化，再创建编码器。
         if (!rtmpLib.initMem()) {
             Log.e(tag, "rtmp init mem failed")
             return false
@@ -62,6 +63,7 @@ class RtmpStreamer(
             return false
         }
         running.set(true)
+        // 独立协程消费帧队列，避免在相机回调线程做编码阻塞。
         sendJob = scope.launch {
             runEncodeLoop()
         }
@@ -81,6 +83,7 @@ class RtmpStreamer(
 
     fun offerFrame(nv21: ByteArray, timestampNs: Long) {
         if (!running.get()) return
+        // 队列满时丢旧帧保新帧，优先保证实时性而非完整性。
         frameChannel.trySend(VideoFrame(nv21, timestampNs))
     }
 
@@ -115,6 +118,7 @@ class RtmpStreamer(
                 val inputBuffer = codec.getInputBuffer(inputIndex)
                 if (inputBuffer != null) {
                     inputBuffer.clear()
+                    // 不同编码器可接受的 YUV 排布不同，按协商结果转换颜色格式。
                     val yuv = when (colorFormat) {
                         MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar -> nv21ToNv12(frame.nv21)
                         MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar -> nv21ToI420(frame.nv21)
@@ -184,6 +188,7 @@ class RtmpStreamer(
         return try {
             val caps = codec.codecInfo.getCapabilitiesForType(mimeType)
             val formats = caps.colorFormats.toSet()
+            // 优先使用明确格式，减少不同设备上 Flexible 模式的不确定行为。
             when {
                 formats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar) ->
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar

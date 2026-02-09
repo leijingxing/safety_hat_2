@@ -37,6 +37,7 @@ class HudViewModel(
 
     private val _state = MutableStateFlow(HudState())
     val state: StateFlow<HudState> = _state.asStateFlow()
+    // 保存最近 1 分钟违规事件，用于侧栏统计卡片。
     private val violationHistory: ArrayDeque<Pair<Long, String>> = ArrayDeque()
 
     init {
@@ -118,6 +119,7 @@ class HudViewModel(
 
     fun submitRtmpFrame(nv21: ByteArray, width: Int, height: Int, timestampNs: Long) {
         if (_state.value.frameWidth == 0 || _state.value.frameHeight == 0) {
+            // 首帧回填分辨率，供“开始推流”按钮使用。
             _state.value = _state.value.copy(frameWidth = width, frameHeight = height)
         }
         rtmpRepository?.offerFrame(nv21, width, height, timestampNs)
@@ -155,6 +157,7 @@ class HudViewModel(
         val now = System.currentTimeMillis()
         newViolations.forEach { violationHistory.addLast(now to it) }
         val cutoff = now - 60_000
+        // 滑动时间窗：持续清理 1 分钟前数据，保持统计口径稳定。
         while (violationHistory.isNotEmpty() && violationHistory.first().first < cutoff) {
             violationHistory.removeFirst()
         }

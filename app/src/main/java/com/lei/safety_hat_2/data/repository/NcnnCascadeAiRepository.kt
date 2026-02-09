@@ -40,12 +40,14 @@ class NcnnCascadeAiRepository(
     private val vestLastMs = AtomicLong(0)
     private val minPersonConfidence = 0.5f
     private val minPersonAreaRatio = 0.02f
+    // 级联入口只认可人员相关标签，避免把其他类别误当作下游裁剪目标。
     private val personLabels = setOf("person", "personup", "persondown")
 
     private val safeListener = object : BaseAi.BaseListener<Array<String>, Array<SafeMod.SafeObj>> {
         override fun onValue(value: Array<String>) = Unit
 
         override fun onValue(img: Mat, pts: Long, array: Array<SafeMod.SafeObj>) {
+            // 先筛掉低置信度和过小目标，减少后续级联模型的无效推理。
             val validPersons = filterValidPersons(img, array)
             if (validPersons.isEmpty()) {
                 return
@@ -120,6 +122,7 @@ class NcnnCascadeAiRepository(
     }
 
     override fun submitFrame(rgbaMat: Mat, pts: Long) {
+        // 级联链路的唯一入口：始终先走 SafeMod，再由回调触发下游模型。
         safeMod.onRecvImage(rgbaMat, rgbaMat.nativeObj, pts)
     }
 
@@ -155,6 +158,7 @@ class NcnnCascadeAiRepository(
                 confidence = obj.prob
             )
         }.filter { box ->
+            // 仅对人员类目标做面积过滤，避免远距离/小目标导致级联误触发。
             if (box.confidence < minPersonConfidence) return@filter false
             val labelKey = box.label
             val areaRatio = (box.right - box.left) * (box.bottom - box.top)
@@ -235,6 +239,7 @@ class NcnnCascadeAiRepository(
         val height = img.height()
         array.filter { labels.contains(it.lableString) }
             .forEach { obj ->
+                // 对检测框做轻微扩张，给下游分类模型保留上下文信息。
                 val rect = expandRect(obj.rect, width, height, 0.2f)
                 val cropped = img.submat(rect)
                 try {
@@ -274,6 +279,7 @@ class NcnnCascadeAiRepository(
     }
 
     private fun shouldRun(lastMs: AtomicLong, pts: Long, intervalMs: Long): Boolean {
+        // 使用时间戳做模型限频，避免每帧都跑完整级联导致 CPU/GPU 持续满载。
         val nowMs = pts / 1_000_000
         val prev = lastMs.get()
         if (nowMs - prev < intervalMs) return false

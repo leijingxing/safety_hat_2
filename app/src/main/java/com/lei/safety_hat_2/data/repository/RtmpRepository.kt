@@ -17,6 +17,7 @@ class RtmpRepository(
     fun start(width: Int, height: Int) {
         if (running.get()) return
         val url = "${baseUrl}/${streamId}"
+        // 经验值码率：像素总量 * 2，后续可按网络质量做自适应。
         val bitrate = width * height * 2
         val newStreamer = RtmpStreamer(
             url = url,
@@ -24,6 +25,7 @@ class RtmpRepository(
             height = height,
             fps = fps,
             bitrate = bitrate,
+            // 优先尝试 HEVC，设备不支持时由 RtmpStreamer 内部回退 AVC。
             preferredMimeType = MediaFormat.MIMETYPE_VIDEO_HEVC
         )
         if (newStreamer.start()) {
@@ -43,6 +45,7 @@ class RtmpRepository(
 
     fun offerFrame(nv21: ByteArray, width: Int, height: Int, timestampNs: Long) {
         if (!running.get()) return
+        // 宽高参数在 start 阶段已固化，这里仅转发帧与时间戳。
         streamer?.offerFrame(nv21, timestampNs)
     }
 

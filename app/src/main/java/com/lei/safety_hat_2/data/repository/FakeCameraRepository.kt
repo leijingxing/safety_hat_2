@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class FakeCameraRepository : CameraRepository {
+    // 仅用于本地调试：通过状态流模拟相机在线/离线。
     private val _isOnline = MutableStateFlow(true)
     override val isOnline: Flow<Boolean> = _isOnline.asStateFlow()
 
